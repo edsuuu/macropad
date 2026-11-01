@@ -1,0 +1,2 @@
+// Ícone do macropad.exe (Explorer, janela e barra de tarefas). Id 1: o main.rs carrega com Icon::from_resource(1).
+1 ICON "icon.ico"
