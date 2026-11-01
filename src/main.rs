@@ -12,7 +12,8 @@ use std::os::windows::process::CommandExt;
 use tao::dpi::LogicalSize;
 use tao::event::{Event, WindowEvent};
 use tao::event_loop::{ControlFlow, EventLoopBuilder};
-use tao::window::WindowBuilder;
+use tao::platform::windows::{IconExtWindows, WindowBuilderExtWindows};
+use tao::window::{Icon, WindowBuilder};
 use watch::Signal;
 
 const LAYER: u8 = 1; // ponytail: só a camada 1; a placa tem 3, mas a 3x1 não tem como trocar de camada
@@ -310,6 +311,9 @@ fn main() -> wry::Result<()> {
     let event_loop = EventLoopBuilder::<UserEvent>::with_user_event().build();
     let window = WindowBuilder::new()
         .with_title("Macropad")
+        // O ícone que o build.rs pôs no .exe (assets/icon.rc, id 1).
+        .with_window_icon(Icon::from_resource(1, None).ok())
+        .with_taskbar_icon(Icon::from_resource(1, None).ok())
         .with_inner_size(LogicalSize::new(1200.0, 760.0))
         .with_min_inner_size(LogicalSize::new(900.0, 560.0))
         .build(&event_loop)
