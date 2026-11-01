@@ -11,7 +11,7 @@ fn main() {
     println!("cargo:rustc-link-arg-bins={}", res.display());
 }
 
-/// O rc.exe x64 da versão mais nova do Windows SDK instalada.
+/// Um rc.exe x64 do Windows SDK (qualquer versão compila um .ico; `max` só desempata pelo nome da pasta).
 fn rc() -> PathBuf {
     let kits = Path::new(r"C:\Program Files (x86)\Windows Kits\10\bin");
     std::fs::read_dir(kits)
