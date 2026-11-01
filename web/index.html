@@ -42,7 +42,6 @@
   #status { color: var(--muted); flex: 1; }
   .tune { margin-top: 10px; gap: 18px; color: var(--muted); }
   .tune label { display: flex; align-items: center; gap: 6px; }
-  #ledcolor { width: 28px; height: 22px; padding: 0; border: none; background: none; }
   #log { margin-top: 10px; height: 100px; overflow: hidden; font-size: 12px; color: var(--muted); }
   #log b { color: var(--text); font-weight: 600; }
 </style>
@@ -66,15 +65,23 @@
       <span id="status"></span>
     </div>
     <div class="row tune">
-      <label title="Cor do LED no desenho">LED <input type="color" id="ledcolor" value="#5aa9ff"></label>
-      <label title="Grava na hora o modo do LED da placa. Só 0 e 1 são conhecidos; teste os outros">LED da placa
-        <select id="ledmode">
+      <label title="Grava na hora o efeito e a cor do LED da placa">LED
+        <select id="ledeffect">
           <option value="0">Desligado</option>
           <option value="1">Sempre aceso</option>
-          <option value="2">Modo 2 (testar)</option>
-          <option value="3">Modo 3 (testar)</option>
-          <option value="4">Modo 4 (testar)</option>
-          <option value="5">Modo 5 (testar)</option>
+          <option value="2">Acende ao apertar</option>
+          <option value="3">Acende ao apertar (efeito 2)</option>
+          <option value="4">Acende ao apertar (efeito 3)</option>
+        </select>
+        <select id="ledhue">
+          <option value="0">Cores da placa</option>
+          <option value="1">Vermelho</option>
+          <option value="2">Laranja</option>
+          <option value="3">Amarelo</option>
+          <option value="4">Verde</option>
+          <option value="5">Ciano</option>
+          <option value="6">Azul</option>
+          <option value="7">Roxo</option>
         </select></label>
       <label title="Se o traço do knob no desenho não bater com o de verdade, arraste até bater">Marca do knob
         <input type="range" id="mark" min="-180" max="180" step="1"></label>
@@ -99,8 +106,11 @@ const STEP = Math.PI / 10;
 let connected = false, knobPress = 0, frame = 0;
 // Começa onde o traço está na placa: quase reto, 7° à esquerda (medido na foto). Chave nova para largar o ângulo antigo, que tinha derivado.
 let knobAngle = localGet('knobAngle') !== null ? Number(localGet('knobAngle')) : THREE.MathUtils.degToRad(7);
-const ledColor = new THREE.Color(localGet('led') || '#5aa9ff');
-$('ledcolor').value = '#' + ledColor.getHexString();
+// LED da placa: efeito (0 apagado, 1 aceso, 2..4 acendem ao apertar) e cor (1..7; 0 = as cores da própria placa).
+// A placa não conta como está: vale a última escolha feita aqui (2 + azul foi o que ficou certo na placa dele).
+const LED_COLORS = ['#5aa9ff', '#ff4545', '#ff9a3c', '#ffd84a', '#4ade80', '#3fe0e0', '#5aa9ff', '#b47cff'];
+let ledEffect = Number(localGet('ledEffect') ?? 2), ledHue = Number(localGet('ledHue') ?? 6);
+const ledColor = new THREE.Color(LED_COLORS[ledHue]);
 
 function localGet(k) { try { return localStorage.getItem(k); } catch { return null; } }
 function localSet(k, v) { try { localStorage.setItem(k, v); } catch {} }
@@ -352,7 +362,8 @@ function updateLabels() {
 // ---------- LEDs e animação ----------
 function applyLeds() {
   for (const l of leds) {
-    const base = connected ? 1 : 0, f = l.flash;
+    // Como na placa: aceso parado só no "Sempre aceso"; desligado nem pisca.
+    const base = connected && ledEffect === 1 ? 1 : 0, f = ledEffect ? l.flash : 0;
     l.light.intensity = base * 60 + f * 600;
     l.glow.material.opacity = Math.min(1, base * 0.55 + f * 0.6);
     l.glow.scale.setScalar(16 + f * 26);
@@ -531,19 +542,26 @@ $('gravar').onclick = () => {
   $('status').textContent = 'Gravando...';
   ipc({ t: 'gravar', slots: D.slots });
 };
-$('ledcolor').oninput = e => {
-  ledColor.set(e.target.value);
-  localSet('led', e.target.value);
+/// Lê o efeito e a cor da tela, pinta o desenho e, com `send`, grava na placa (o byte é cor << 4 | efeito).
+function setLed(send) {
+  // Nos efeitos de apertar, a cor 0 não acende nada: vai azul.
+  if ($('ledeffect').value >= 2 && $('ledhue').value === '0') $('ledhue').value = '6';
+  ledEffect = Number($('ledeffect').value);
+  ledHue = Number($('ledhue').value);
+  localSet('ledEffect', ledEffect);
+  localSet('ledHue', ledHue);
+  ledColor.set(LED_COLORS[ledHue]);
   for (const l of leds) { l.light.color.copy(ledColor); l.glow.material.color.copy(ledColor); }
+  applyLeds();
   invalidate();
-};
-// A placa não conta o modo em que está: o select mostra a última escolha feita aqui.
-$('ledmode').value = localGet('ledMode') ?? '1';
-$('ledmode').onchange = e => {
-  localSet('ledMode', e.target.value);
-  $('status').textContent = 'Gravando LED...';
-  ipc({ t: 'led', mode: Number(e.target.value) });
-};
+  if (send) {
+    $('status').textContent = 'Gravando LED...';
+    ipc({ t: 'led', mode: ledHue << 4 | ledEffect });
+  }
+}
+$('ledeffect').value = ledEffect;
+$('ledhue').value = ledHue;
+$('ledeffect').onchange = $('ledhue').onchange = () => setLed(true);
 
 // ---------- Chamadas do Rust ----------
 window.init = data => {
