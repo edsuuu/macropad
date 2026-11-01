@@ -11,7 +11,7 @@ App para configurar a macropad chinesa de **3 teclas + knob** (chip CH57x, USB `
 - Escolhe a ação de cada tecla e do knob (girar à esquerda, apertar, girar à direita): tecla com Ctrl/Shift/Alt/Win, mídia (volume, play/pause, faixas), mouse ou um **comando** (abre programa, pasta ou site).
 - Grava tudo na própria placa: depois funciona em qualquer PC, sem o app aberto (só o tipo Comando precisa do app rodando em segundo plano, que ele liga sozinho no início do Windows).
 - Mostra a placa ao vivo: a tecla afunda, o LED acende e o knob gira quando você mexe na placa de verdade.
-- Escolhe o modo do LED da placa.
+- Escolhe o efeito e a cor do LED da placa: apagado, sempre aceso ou acende ao apertar, em 7 cores.
 
 ## Instalar
 
