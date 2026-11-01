@@ -1,0 +1,54 @@
+# Compila o app e gera o instalador (tools\build-installer.ps1) a cada push e PR, com o Macropad-Setup.exe nos
+# artefatos da execução. No main, se a versão do Cargo.toml ainda não tem release, publica a v<versão> com ele
+# (uma execução por vez, para duas não criarem a mesma).
+name: Instalador
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency: release-${{ github.ref }}
+
+jobs:
+  instalador:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Versão
+        shell: pwsh
+        run: |
+          $version = (Select-String -Path Cargo.toml -Pattern '^version = "(.+)"').Matches[0].Groups[1].Value
+          "VERSION=$version" >> $env:GITHUB_ENV
+
+      - name: Inno Setup
+        shell: pwsh
+        run: if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) { choco install innosetup --no-progress -y }
+
+      - name: Testes
+        run: cargo test --release
+
+      - name: Build e instalador
+        shell: pwsh
+        run: .\tools\build-installer.ps1
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Macropad-${{ env.VERSION }}
+          path: target/installer/Macropad-Setup.exe
+
+      - name: Release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "v$env:VERSION"
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -eq 0) { "$tag já existe"; exit 0 }
+          gh release create $tag target/installer/Macropad-Setup.exe --title "Macropad $env:VERSION" --generate-notes --target $env:GITHUB_SHA
