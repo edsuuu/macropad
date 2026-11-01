@@ -1,0 +1,579 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Macropad</title>
+<style>
+  :root { --bg: #111113; --panel: #18181b; --line: #2a2a2f; --text: #e8e8ea; --muted: #9a9aa2; --accent: #5aa9ff; --ok: #3ecf8e; --bad: #ef5b5b; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font: 13px/1.4 "Segoe UI", system-ui, sans-serif; overflow: hidden; }
+  body { display: flex; }
+  #view { flex: 1; position: relative; min-width: 0; background: radial-gradient(ellipse at 50% 38%, #26262c 0%, #111113 72%); }
+  #view canvas { display: block; width: 100%; height: 100%; outline: none; }
+  #hint { position: absolute; left: 16px; bottom: 12px; color: var(--muted); font-size: 12px; pointer-events: none; }
+  #toast { position: absolute; left: 50%; top: 18px; transform: translateX(-50%); background: rgba(24, 24, 27, .92); border: 1px solid var(--line);
+           padding: 8px 16px; border-radius: 999px; font-weight: 600; opacity: 0; transition: opacity .25s; pointer-events: none; white-space: nowrap; }
+  #toast.on { opacity: 1; }
+  #mark { width: 150px; accent-color: var(--accent); }
+  #knobinfo { position: absolute; left: 16px; top: 16px; background: rgba(24, 24, 27, .92); border: 1px solid var(--line);
+              border-radius: 10px; padding: 10px 16px; font-weight: 600; line-height: 1.7; pointer-events: none; }
+  #knobinfo small { display: block; color: var(--muted); font-weight: 400; }
+  #knobinfo span { display: inline-block; width: 20px; color: var(--muted); }
+  aside { width: 440px; background: var(--panel); border-left: 1px solid var(--line); display: flex; flex-direction: column; }
+  header { padding: 16px 18px 8px; display: flex; align-items: center; justify-content: space-between; }
+  h1 { font-size: 18px; margin: 0; font-weight: 600; }
+  .pill { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--muted); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--bad); }
+  .pill.on .dot { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
+  #slots { padding: 0 10px; overflow-y: auto; flex: 1; }
+  .slot { padding: 9px 10px; border-radius: 8px; border: 1px solid transparent; }
+  .slot:hover, .slot.sel { background: #1f1f23; border-color: var(--line); }
+  .slot.flash { animation: flash .7s; }
+  @keyframes flash { from { background: rgba(90, 169, 255, .35); border-color: var(--accent); } }
+  .slot .name { font-weight: 600; margin-bottom: 6px; }
+  .row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+  select, input[type=text], button { background: #232328; color: var(--text); border: 1px solid #34343a; border-radius: 6px; padding: 5px 8px; font: inherit; }
+  input[type=text] { flex: 1; min-width: 200px; }
+  button { cursor: pointer; }
+  button:hover, select:hover { border-color: #4a4a52; }
+  label.mod { display: flex; align-items: center; gap: 3px; color: var(--muted); }
+  footer { padding: 12px 18px 14px; border-top: 1px solid var(--line); }
+  #gravar { background: var(--accent); color: #06121f; border: none; font-weight: 600; padding: 8px 16px; }
+  #status { color: var(--muted); flex: 1; }
+  .tune { margin-top: 10px; gap: 18px; color: var(--muted); }
+  .tune label { display: flex; align-items: center; gap: 6px; }
+  #ledcolor { width: 28px; height: 22px; padding: 0; border: none; background: none; }
+  #log { margin-top: 10px; height: 100px; overflow: hidden; font-size: 12px; color: var(--muted); }
+  #log b { color: var(--text); font-weight: 600; }
+</style>
+<script type="importmap">{ "imports": { "three": "/three.module.min.js" } }</script>
+</head>
+<body>
+<div id="view">
+  <div id="toast"></div>
+  <div id="knobinfo"><small>Knob</small><div id="knoblines"></div></div>
+  <div id="hint">Clique numa peça para achar a configuração dela</div>
+</div>
+<aside>
+  <header>
+    <h1>Macropad</h1>
+    <div class="pill" id="pill"><span class="dot"></span><span id="pilltext">Desconectada</span></div>
+  </header>
+  <div id="slots"></div>
+  <footer>
+    <div class="row">
+      <button id="gravar">Gravar na placa</button>
+      <span id="status"></span>
+    </div>
+    <div class="row tune">
+      <label title="Cor do LED no desenho">LED <input type="color" id="ledcolor" value="#5aa9ff"></label>
+      <label title="Grava na hora o modo do LED da placa. Só 0 e 1 são conhecidos; teste os outros">LED da placa
+        <select id="ledmode">
+          <option value="0">Desligado</option>
+          <option value="1">Sempre aceso</option>
+          <option value="2">Modo 2 (testar)</option>
+          <option value="3">Modo 3 (testar)</option>
+          <option value="4">Modo 4 (testar)</option>
+          <option value="5">Modo 5 (testar)</option>
+        </select></label>
+      <label title="Se o traço do knob no desenho não bater com o de verdade, arraste até bater">Marca do knob
+        <input type="range" id="mark" min="-180" max="180" step="1"></label>
+    </div>
+    <div id="log"></div>
+  </footer>
+</aside>
+<script type="module">
+import * as THREE from 'three';
+import { RoomEnvironment } from '/RoomEnvironment.js';
+
+const $ = id => document.getElementById(id);
+const ipc = msg => window.ipc?.postMessage(JSON.stringify(msg));
+const KINDS = ['Teclado', 'Mídia', 'Mouse', 'Comando'];
+const MODS = [[1, 'Ctrl'], [2, 'Shift'], [4, 'Alt'], [8, 'Win']];
+// Medidas em mm, tiradas da foto: placa 86 × 30, teclas a cada 19,2 mm, knob de 22 mm.
+const KEYS_X = [-10, 9.2, 28.4], KEY_Z = -1.5, CAP_Y = 8.7, KNOB = { x: -34, y: 7 };
+let D = { slots: [], keys: [], media: [], mouse: [], names: [] };
+// O knob é um encoder sem fim: a placa só avisa cada clique, então o ângulo do desenho fica guardado aqui.
+// ponytail: 20 cliques por volta (o comum nesses encoders); se a placa tiver outro número, mudar STEP
+const STEP = Math.PI / 10;
+let connected = false, knobPress = 0, frame = 0;
+// Começa onde o traço está na placa: quase reto, 7° à esquerda (medido na foto). Chave nova para largar o ângulo antigo, que tinha derivado.
+let knobAngle = localGet('knobAngle') !== null ? Number(localGet('knobAngle')) : THREE.MathUtils.degToRad(7);
+const ledColor = new THREE.Color(localGet('led') || '#5aa9ff');
+$('ledcolor').value = '#' + ledColor.getHexString();
+
+function localGet(k) { try { return localStorage.getItem(k); } catch { return null; } }
+function localSet(k, v) { try { localStorage.setItem(k, v); } catch {} }
+/// Canvas já no tamanho final: o three.js reserva a textura no tamanho do primeiro envio e não aceita mudar depois.
+const canvas = (width, height) => Object.assign(document.createElement('canvas'), { width, height });
+
+// ---------- Cena ----------
+const view = $('view');
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+view.prepend(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.environment = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(), 0.04).texture;
+// Câmera parada, olhando reto de cima: a frente (USB) fica embaixo na tela.
+const camera = new THREE.PerspectiveCamera(32, 1, 1, 3000);
+const TARGET = new THREE.Vector3(-1, 7, 0);
+camera.up.set(0, 0, -1);
+
+const sun = new THREE.DirectionalLight(0xffffff, 1.5);
+sun.position.set(-70, 170, 90);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+Object.assign(sun.shadow.camera, { left: -110, right: 110, top: 110, bottom: -110, near: 10, far: 500 });
+sun.shadow.camera.updateProjectionMatrix();
+sun.shadow.bias = -0.0004;
+scene.add(sun, new THREE.HemisphereLight(0xffffff, 0x1c1c20, 0.35));
+
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(1200, 1200), new THREE.ShadowMaterial({ opacity: 0.38 }));
+ground.rotation.x = -Math.PI / 2;
+ground.receiveShadow = true;
+scene.add(ground);
+
+const pad = new THREE.Group();
+scene.add(pad);
+
+// ---------- Peças ----------
+function rrect(w, h, r, cx = 0, cy = 0) {
+  const s = new THREE.Shape(), x = cx - w / 2, y = cy - h / 2;
+  s.moveTo(x + r, y);
+  s.lineTo(x + w - r, y); s.quadraticCurveTo(x + w, y, x + w, y + r);
+  s.lineTo(x + w, y + h - r); s.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  s.lineTo(x + r, y + h); s.quadraticCurveTo(x, y + h, x, y + h - r);
+  s.lineTo(x, y + r); s.quadraticCurveTo(x, y, x + r, y);
+  return s;
+}
+
+/// Chapa deitada: a forma no plano XZ (y da forma vira -z), de `y` até `y + height`, com bordas arredondadas.
+function slab(shape, y, height, material, bevel = 0.6) {
+  const g = new THREE.ExtrudeGeometry(shape, { depth: height - 2 * bevel, bevelEnabled: true, bevelThickness: bevel, bevelSize: bevel, bevelSegments: 3, curveSegments: 18 });
+  g.rotateX(-Math.PI / 2);
+  g.translate(0, y + bevel, 0);
+  const m = new THREE.Mesh(g, material);
+  m.castShadow = m.receiveShadow = true;
+  pad.add(m);
+  return m;
+}
+
+const acrylic = new THREE.MeshPhysicalMaterial({ color: 0x9a9da3, roughness: 0.5, transmission: 0.88, thickness: 4, ior: 1.49, clearcoat: 0.4, clearcoatRoughness: 0.5 });
+const b = 0.6; // chanfro: a forma encolhe o que o chanfro cresce
+slab(rrect(86 - 2 * b, 30 - 2 * b, 4), 0, 3.2, acrylic);
+const rim = rrect(86 - 2 * b, 30 - 2 * b, 4);
+rim.holes.push(rrect(59.2 + 2 * b, 24 + 2 * b, 2.5, 9.1, 0));
+slab(rim, 3.2, 3.8, acrylic);
+
+// Teclas: switch embaixo e tecla com perfil afinando para cima, com o nome da ação no topo.
+function keycapGeometry() {
+  const g = new THREE.ExtrudeGeometry(rrect(16.4, 16.4, 2.2), { depth: 6.6, bevelEnabled: true, bevelThickness: 0.8, bevelSize: 0.8, bevelSegments: 4, curveSegments: 8 });
+  g.rotateX(-Math.PI / 2);
+  g.computeBoundingBox();
+  g.translate(0, -g.boundingBox.min.y, 0);
+  const p = g.attributes.position, h = g.boundingBox.max.y - g.boundingBox.min.y;
+  for (let i = 0; i < p.count; i++) {
+    const k = 1 - 0.2 * (p.getY(i) / h);
+    p.setX(i, p.getX(i) * k);
+    p.setZ(i, p.getZ(i) * k);
+  }
+  return [g, h];
+}
+const [capGeometry, CAP_H] = keycapGeometry();
+const switchMaterial = new THREE.MeshStandardMaterial({ color: 0x232327, roughness: 0.55 });
+const keys = KEYS_X.map((x, i) => {
+  const group = new THREE.Group();
+  group.position.set(x, CAP_Y, KEY_Z);
+  group.userData.slot = i;
+  const material = new THREE.MeshStandardMaterial({ color: 0x18181b, roughness: 0.8 });
+  const cap = new THREE.Mesh(capGeometry, material);
+  cap.castShadow = cap.receiveShadow = true;
+  const texture = new THREE.CanvasTexture(canvas(256, 256));
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.anisotropy = 8;
+  const legend = new THREE.Mesh(new THREE.PlaneGeometry(12, 12), new THREE.MeshBasicMaterial({ map: texture, transparent: true }));
+  legend.rotation.x = -Math.PI / 2;
+  legend.position.y = CAP_H + 0.03;
+  group.add(cap, legend);
+  const sw = new THREE.Mesh(new THREE.BoxGeometry(14, 5.5, 14), switchMaterial);
+  sw.position.set(x, 3.2 + 2.75, KEY_Z);
+  sw.castShadow = true;
+  pad.add(group, sw);
+  return { group, material, texture, press: 0 };
+});
+
+// LEDs na frente de cada tecla: chip, luz e um halo somado por cima.
+const halo = (() => {
+  const c = document.createElement('canvas');
+  c.width = c.height = 128;
+  const x = c.getContext('2d'), g = x.createRadialGradient(64, 64, 0, 64, 64, 64);
+  g.addColorStop(0, 'rgba(255,255,255,1)');
+  g.addColorStop(0.22, 'rgba(255,255,255,.5)');
+  g.addColorStop(1, 'rgba(255,255,255,0)');
+  x.fillStyle = g;
+  x.fillRect(0, 0, 128, 128);
+  return new THREE.CanvasTexture(c);
+})();
+const leds = KEYS_X.map(x => {
+  const light = new THREE.PointLight(ledColor, 0, 45, 2);
+  light.position.set(x, 4.6, 9.5);
+  const chip = new THREE.Mesh(new THREE.BoxGeometry(3, 0.8, 1.6), new THREE.MeshBasicMaterial({ color: ledColor.clone() }));
+  chip.position.set(x, 3.6, 9.5);
+  const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: halo, color: ledColor, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true }));
+  glow.position.set(x, 4.4, 9.5);
+  pad.add(light, chip, glow);
+  return { light, chip, glow, flash: 0 };
+});
+
+// Knob: cilindro serrilhado, aro prateado e tampo de alumínio escovado em cone, com a marca branca.
+const knob = new THREE.Group();
+knob.position.set(KNOB.x, KNOB.y, 0);
+knob.userData.slot = 4;
+pad.add(knob);
+const knurl = new THREE.CylinderGeometry(11, 11, 14, 96, 1, true);
+{
+  const p = knurl.attributes.position;
+  for (let i = 0; i < p.count; i++) {
+    const k = 1 + 0.025 * Math.sign(Math.sin(Math.atan2(p.getZ(i), p.getX(i)) * 48));
+    p.setX(i, p.getX(i) * k);
+    p.setZ(i, p.getZ(i) * k);
+  }
+  knurl.computeVertexNormals();
+  knurl.translate(0, 7, 0);
+}
+const knobMaterial = new THREE.MeshStandardMaterial({ color: 0x1b1b1e, metalness: 0.8, roughness: 0.42, flatShading: true });
+const silver = new THREE.MeshStandardMaterial({ color: 0xcfd0d4, metalness: 1, roughness: 0.22 });
+function brushed() {
+  const c = document.createElement('canvas');
+  c.width = c.height = 512;
+  const x = c.getContext('2d'), g = x.createConicGradient(0, 256, 256);
+  for (let i = 0; i <= 160; i++) {
+    const a = i / 160, sheen = Math.max(0, Math.cos((a - 0.12) * Math.PI * 4)) ** 6; // dois cones claros opostos, como na foto
+    const v = Math.round(36 + Math.random() * 14 + sheen * 120);
+    g.addColorStop(a, `rgb(${v},${v},${v + 3})`);
+  }
+  x.fillStyle = g;
+  x.fillRect(0, 0, 512, 512);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+const top = new THREE.MeshStandardMaterial({ map: brushed(), metalness: 0.85, roughness: 0.32 });
+const rimMaterial = new THREE.MeshStandardMaterial({ color: 0x3a3b40, metalness: 0.7, roughness: 0.4 }); // aro escuro, como na foto
+const ring = new THREE.Mesh(new THREE.CylinderGeometry(10.2, 11.1, 1.2, 96), rimMaterial);
+ring.position.y = 14.6;
+const cap = new THREE.Mesh(new THREE.CylinderGeometry(10.2, 10.2, 0.4, 96), [rimMaterial, top, rimMaterial]);
+cap.position.y = 15.4;
+// O traço aponta para trás (12 horas vista de frente) com o knob em 0; `knobAngle` gira o knob todo.
+const mark = new THREE.Mesh(new THREE.BoxGeometry(0.75, 0.25, 3.4), new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.4 }));
+mark.position.set(0, 15.7, -7);
+const side = new THREE.Mesh(knurl, knobMaterial);
+for (const m of [side, ring, cap]) m.castShadow = m.receiveShadow = true;
+knob.add(side, ring, cap, mark);
+
+// Parafusos dourados nos cantos.
+const brass = new THREE.MeshStandardMaterial({ color: 0xc9b07a, metalness: 1, roughness: 0.35 });
+const slot = new THREE.MeshStandardMaterial({ color: 0x3a3226, roughness: 0.8 });
+for (const [x, z] of [[-40.5, -11.5], [-40.5, 11.5], [40.5, -11.5], [40.5, 11.5]]) {
+  const head = new THREE.Mesh(new THREE.CylinderGeometry(1.4, 1.4, 0.6, 24), brass);
+  head.position.set(x, 7.3, z);
+  const a = new THREE.Mesh(new THREE.BoxGeometry(2, 0.2, 0.35), slot);
+  a.position.set(x, 7.62, z);
+  const c = a.clone();
+  c.rotation.y = Math.PI / 2;
+  pad.add(head, a, c);
+}
+
+// Entrada USB-C na borda da frente: carcaça de metal, boca escura e a lingueta no meio.
+const shellShape = rrect(9, 3.3, 1.65);
+shellShape.holes.push(rrect(8, 2.4, 1.2));
+const shell = new THREE.Mesh(new THREE.ExtrudeGeometry(shellShape, { depth: 1.2, bevelEnabled: false, curveSegments: 12 }), silver);
+shell.position.set(-22, 3.6, 14.6); // sai 0,8 mm da borda (z = 15)
+const mouth = new THREE.Mesh(new THREE.BoxGeometry(8, 2.4, 0.3), new THREE.MeshStandardMaterial({ color: 0x050506, roughness: 0.9 }));
+mouth.position.set(-22, 3.6, 15.15);
+const tongue = new THREE.Mesh(new THREE.BoxGeometry(6.4, 0.6, 0.5), new THREE.MeshStandardMaterial({ color: 0x2a2a2e, roughness: 0.6 }));
+tongue.position.set(-22, 3.6, 15.45);
+pad.add(shell, mouth, tongue);
+
+// ---------- Textos nas peças ----------
+function writeText(target, lines, size) {
+  const { width: w, height: h } = target;
+  const x = target.getContext('2d');
+  x.clearRect(0, 0, w, h);
+  x.fillStyle = '#ececef';
+  x.font = `600 ${size}px "Segoe UI", sans-serif`;
+  x.textAlign = 'center';
+  x.textBaseline = 'middle';
+  lines.forEach((l, i) => x.fillText(l, w / 2, h / 2 + (i - (lines.length - 1) / 2) * size * 1.2, w * 0.9));
+}
+function wrap(text, max = 11) {
+  const lines = [];
+  for (const word of text.split(' ')) {
+    const last = lines.at(-1);
+    if (last && (last + ' ' + word).length <= max) lines[lines.length - 1] = last + ' ' + word;
+    else lines.push(word);
+  }
+  return lines.slice(0, 4);
+}
+const short = s => s.length > 26 ? s.slice(0, 25) + '…' : s;
+
+function label(a) {
+  if (!a) return '';
+  if (a.Key) {
+    const parts = MODS.filter(([bit]) => a.Key.mods & bit).map(([, n]) => n);
+    const k = D.keys.find(([, c]) => c && c === a.Key.code);
+    if (k) parts.push(k[0]);
+    return parts.join('+') || '(nada)';
+  }
+  if ('Media' in a) return D.media.find(([c]) => c === a.Media)?.[1] ?? '?';
+  if (a.Mouse) return D.mouse.find(([[bt, w]]) => bt === a.Mouse.buttons && w === a.Mouse.wheel)?.[1] ?? '?';
+  return a.Command || 'Comando';
+}
+
+function updateLabels() {
+  keys.forEach((k, i) => {
+    writeText(k.texture.image, wrap(short(label(D.slots[i]))), 40);
+    k.texture.needsUpdate = true;
+  });
+  // As ações do knob ficam num quadro fixo no canto, fora do 3D.
+  $('knoblines').replaceChildren(...[['↺', 3], ['●', 4], ['↻', 5]].map(([icon, i]) => {
+    const line = document.createElement('div'), mark = document.createElement('span');
+    mark.textContent = icon;
+    line.append(mark, short(label(D.slots[i])));
+    return line;
+  }));
+  invalidate();
+}
+
+// ---------- LEDs e animação ----------
+function applyLeds() {
+  for (const l of leds) {
+    const base = connected ? 1 : 0, f = l.flash;
+    l.light.intensity = base * 60 + f * 600;
+    l.glow.material.opacity = Math.min(1, base * 0.55 + f * 0.6);
+    l.glow.scale.setScalar(16 + f * 26);
+    l.chip.material.color.copy(ledColor).multiplyScalar(base || f ? 1 : 0.12);
+  }
+}
+
+/// Afunda a tecla, gira ou aperta o knob e pisca o LED dela.
+function pulse(i) {
+  if (i < 3) {
+    keys[i].press = 1;
+    leds[i].flash = 1;
+  } else if (i === 4) {
+    knobPress = 1;
+    for (const l of leds) l.flash = Math.max(l.flash, 0.5);
+  } else {
+    setKnob(knobAngle + (i === 3 ? STEP : -STEP));
+  }
+  invalidate();
+}
+
+/// Ângulo do knob (positivo = anti-horário visto de cima), guardado e mostrado no controle "Marca do knob".
+function setKnob(angle, snap = false) {
+  knobAngle = angle;
+  if (snap) knob.rotation.y = angle;
+  localSet('knobAngle', angle);
+  $('mark').value = ((-THREE.MathUtils.radToDeg(angle) % 360) + 540) % 360 - 180; // em graus para a direita
+  invalidate();
+}
+setKnob(knobAngle, true);
+$('mark').oninput = e => setKnob(-THREE.MathUtils.degToRad(Number(e.target.value)), true);
+
+function step() {
+  let busy = false;
+  const rest = knobAngle - knob.rotation.y;
+  knob.rotation.y += rest * 0.35;
+  busy ||= Math.abs(rest) > 1e-3;
+  knobPress = knobPress > 0.01 ? knobPress * 0.82 : 0;
+  knob.position.y = KNOB.y - 1.2 * Math.min(1, knobPress * 1.4);
+  for (const k of keys) {
+    k.press = k.press > 0.01 ? k.press * 0.8 : 0;
+    k.group.position.y = CAP_Y - 2.2 * Math.min(1, k.press * 1.4);
+  }
+  for (const l of leds) l.flash = l.flash > 0.01 ? l.flash * 0.9 : 0;
+  busy ||= knobPress > 0 || keys.some(k => k.press > 0) || leds.some(l => l.flash > 0);
+  applyLeds();
+  return busy;
+}
+
+// Só desenha quando algo muda: parado, não gasta GPU.
+function invalidate() { if (!frame) frame = requestAnimationFrame(render); }
+function render() {
+  frame = 0;
+  const busy = step();
+  renderer.render(scene, camera);
+  if (busy) invalidate();
+}
+// A câmera se afasta o bastante para a placa caber na largura.
+new ResizeObserver(() => {
+  renderer.setSize(view.clientWidth, view.clientHeight, false);
+  camera.aspect = view.clientWidth / view.clientHeight;
+  camera.updateProjectionMatrix();
+  const half = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * Math.min(camera.aspect, 1.6);
+  camera.position.set(TARGET.x, TARGET.y + 64 / half, 0);
+  camera.lookAt(TARGET);
+  invalidate();
+}).observe(view);
+
+// Destaque da peça ao passar o mouse na configuração dela.
+function highlight(i, on) {
+  const m = i < 3 ? keys[i].material : knobMaterial;
+  m.emissive.copy(ledColor).multiplyScalar(on ? 0.22 : 0);
+  invalidate();
+}
+
+// Clique numa peça: aperta no desenho e mostra a configuração dela.
+const ray = new THREE.Raycaster();
+renderer.domElement.addEventListener('click', e => {
+  const r = renderer.domElement.getBoundingClientRect();
+  ray.setFromCamera(new THREE.Vector2((e.clientX - r.left) / r.width * 2 - 1, -(e.clientY - r.top) / r.height * 2 + 1), camera);
+  let o = ray.intersectObjects([...keys.map(k => k.group), knob], true)[0]?.object;
+  while (o && o.userData.slot === undefined) o = o.parent;
+  if (!o) return;
+  pulse(o.userData.slot);
+  const row = document.querySelector(`.slot[data-i="${o.userData.slot}"]`);
+  document.querySelectorAll('.slot.sel').forEach(s => s.classList.remove('sel'));
+  row?.classList.add('sel');
+  row?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+});
+
+// ---------- Painel ----------
+function select(options, value, onchange) {
+  const s = document.createElement('select');
+  for (const [v, n] of options) s.add(new Option(n, v));
+  s.value = value;
+  s.onchange = () => onchange(Number(s.value));
+  return s;
+}
+
+function renderSlots() {
+  const box = $('slots');
+  box.replaceChildren();
+  D.slots.forEach((a, i) => {
+    const el = document.createElement('div');
+    el.className = 'slot';
+    el.dataset.i = i;
+    const name = document.createElement('div');
+    name.className = 'name';
+    name.textContent = D.names[i];
+    const row = document.createElement('div');
+    row.className = 'row';
+    el.append(name, row);
+    const set = v => { D.slots[i] = v; updateLabels(); };
+    const kind = a.Key ? 0 : 'Media' in a ? 1 : a.Mouse ? 2 : 3;
+    row.append(select(KINDS.map((k, j) => [j, k]), kind, j => {
+      set([{ Key: { mods: 0, code: 4 } }, { Media: 205 }, { Mouse: { buttons: 1, wheel: 0 } }, { Command: '' }][j]);
+      renderSlots();
+    }));
+    if (a.Key) {
+      for (const [bit, n] of MODS) {
+        const l = document.createElement('label'), c = document.createElement('input');
+        l.className = 'mod';
+        c.type = 'checkbox';
+        c.checked = a.Key.mods & bit;
+        c.onchange = () => { a.Key.mods ^= bit; updateLabels(); };
+        l.append(c, n);
+        row.append(l);
+      }
+      row.append(select(D.keys.map(([n, c]) => [c, n]), a.Key.code, v => { a.Key.code = v; updateLabels(); }));
+    } else if ('Media' in a) {
+      row.append(select(D.media, a.Media, v => set({ Media: v })));
+    } else if (a.Mouse) {
+      const current = D.mouse.findIndex(([[bt, w]]) => bt === a.Mouse.buttons && w === a.Mouse.wheel);
+      row.append(select(D.mouse.map(([, n], j) => [j, n]), current, j => set({ Mouse: { buttons: D.mouse[j][0][0], wheel: D.mouse[j][0][1] } })));
+    } else {
+      const t = document.createElement('input'), test = document.createElement('button');
+      t.type = 'text';
+      t.value = a.Command;
+      t.placeholder = 'notepad, https://site.com, powershell -File C:\\x.ps1';
+      t.oninput = () => set({ Command: t.value });
+      test.textContent = 'Testar';
+      test.onclick = () => ipc({ t: 'testar', cmd: t.value });
+      row.append(t, test);
+    }
+    el.onmouseenter = () => highlight(i, true);
+    el.onmouseleave = () => highlight(i, false);
+    box.append(el);
+  });
+}
+
+function setConnected(on) {
+  connected = on;
+  $('pill').classList.toggle('on', on);
+  $('pilltext').textContent = on ? 'Conectada' : 'Desconectada';
+  invalidate();
+}
+
+let toastTimer = 0;
+function toast(text) {
+  $('toast').textContent = text;
+  $('toast').classList.add('on');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => $('toast').classList.remove('on'), 1600);
+}
+
+function log(text) {
+  const line = document.createElement('div'), when = document.createElement('span'), what = document.createElement('b');
+  when.textContent = new Date().toLocaleTimeString('pt-BR') + '  ';
+  what.textContent = text;
+  line.append(when, what);
+  $('log').prepend(line);
+  while ($('log').children.length > 6) $('log').lastChild.remove();
+}
+
+$('gravar').onclick = () => {
+  $('status').textContent = 'Gravando...';
+  ipc({ t: 'gravar', slots: D.slots });
+};
+$('ledcolor').oninput = e => {
+  ledColor.set(e.target.value);
+  localSet('led', e.target.value);
+  for (const l of leds) { l.light.color.copy(ledColor); l.glow.material.color.copy(ledColor); }
+  invalidate();
+};
+// A placa não conta o modo em que está: o select mostra a última escolha feita aqui.
+$('ledmode').value = localGet('ledMode') ?? '1';
+$('ledmode').onchange = e => {
+  localSet('ledMode', e.target.value);
+  $('status').textContent = 'Gravando LED...';
+  ipc({ t: 'led', mode: Number(e.target.value) });
+};
+
+// ---------- Chamadas do Rust ----------
+window.init = data => {
+  D = data;
+  renderSlots();
+  updateLabels();
+  setConnected(data.connected);
+};
+window.gravado = ({ text, connected: on }) => {
+  $('status').textContent = text;
+  setConnected(on);
+};
+window.plugged = on => setConnected(on);
+window.press = ({ slots, what }) => {
+  if (!D.names.length) return; // chegou antes do init: ainda não há nomes nem desenho com rótulos
+  slots.forEach(pulse);
+  for (const i of slots) {
+    const row = document.querySelector(`.slot[data-i="${i}"]`);
+    row?.classList.remove('flash');
+    void row?.offsetWidth; // reinicia a animação
+    row?.classList.add('flash');
+  }
+  const text = slots.length
+    ? slots.map(i => `${D.names[i]} · ${label(D.slots[i])}`).join(', ')
+    : `A placa mandou ${what} (não bate com nada gravado)`;
+  toast(text);
+  log(text);
+};
+
+ipc({ t: 'init' });
+</script>
+</body>
+</html>
