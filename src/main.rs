@@ -140,7 +140,9 @@ fn msg(b: &[u8]) -> [u8; 64] {
     m
 }
 
-/// Modo do LED da placa, como o `led <modo>` da ferramenta original: 0 apaga, 1 aceso; os outros não são documentados.
+/// LED da placa, como o `led <modo>` da ferramenta original. O byte é `cor << 4 | efeito`, como no modelo 884x:
+/// efeito 0 apaga, 1 aceso, 2..4 acendem ao apertar; cor 1..7 (vermelho a roxo), 0 = as cores da placa.
+/// Testado nesta placa: 0x62 (azul, acende ao apertar e apaga).
 fn led_messages(mode: u8) -> [[u8; 64]; 3] {
     [msg(&[0x03, 0xa1, 0x01]), msg(&[0x03, 0xb0, 0x18, mode]), msg(&[0x03, 0xaa, 0xa1])]
 }
@@ -191,7 +193,7 @@ fn write(slots: &[Action; 6]) -> Result<(), String> {
 
 fn set_led(mode: u8) -> String {
     match send(led_messages(mode)) {
-        Ok(()) => format!("LED da placa no modo {mode}."),
+        Ok(()) => format!("LED da placa gravado ({mode:#04x})."),
         Err(e) => format!("Não gravou o LED: {e}."),
     }
 }
